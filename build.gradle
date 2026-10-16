@@ -1,0 +1,37 @@
+plugins {
+    id 'maven-publish'
+}
+
+group = "com.github.Hidonix-Industries"
+version = "1.0.0"
+
+publishing {
+    publications {
+        release(MavenPublication) {
+            artifactId = "ION-SDK-Android"
+            artifact(file("ION-release.aar"))
+
+            pom {
+                name = "Hidonix ION SDK"
+                description = "Compiled Android SDK (Kotlin + C++)"
+                url = "https://github.com/Hidonix-Industries/ION-SDK-Android"
+                packaging = "aar"
+
+                withXml {
+                    def depsNode = asNode().appendNode('dependencies')
+
+                    def addDep = { g, a, v ->
+                        def d = depsNode.appendNode('dependency')
+                        d.appendNode('groupId', g)
+                        d.appendNode('artifactId', a)
+                        d.appendNode('version', v)
+                        d.appendNode('scope', 'compile')
+                    }
+
+                    addDep('org.jetbrains.kotlinx', 'kotlinx-coroutines-android', '1.7.3')
+                    addDep('org.jetbrains.kotlinx', 'kotlinx-serialization-json', '1.6.0')
+                }
+            }
+        }
+    }
+}
