@@ -73,7 +73,7 @@ Add the following dependencies inside your app module `build.gradle` file. The p
 dependencies {
 
     // ION SDK
-    implementation 'com.github.Hidonix-Industries:ION-SDK-Android:1.0.0'
+    implementation 'com.github.Hidonix-Industries:ION-SDK-Android:2.2.0'
 
     // Required dependencies
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
