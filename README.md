@@ -636,14 +636,14 @@ Enabling AR does not make ARCore a requirement of your app: a device without ARC
 ### 2. Choose the AR role
 
 ```
-ionLocationManager.setArRole(IONArRole.MOTO)       // default
-ionLocationManager.setArRole(IONArRole.POSIZIONE)
+ionLocationManager.setArRole(IONArRole.MOTION)       // default
+ionLocationManager.setArRole(IONArRole.POSITION)
 ```
 
 `IONArRole` decides what ARCore does *inside* the estimator. It is orthogonal to `setArNavigationEnabled`: with AR navigation on, the starting floor is declared by a scanned marker and by nothing else, regardless of the role.
 
-- **`MOTO`** — ARCore is the transition model: it provides distance travelled and direction of travel, and the neural dead reckoning falls back to reserve. This is the historical behaviour and what you get by calling only `setArNavigationEnabled(true)`.
-- **`POSIZIONE`** — the neural dead reckoning stays the transition model and the VIO position enters as a high-weight observation. The displayed position follows the VIO closely because the observation dominates the likelihood, not because the prediction comes from it — the two are kept separate on purpose, since the same source in both prediction and correction would make the filter more confident than the data allows.
+- **`MOTION`** — ARCore is the transition model: it provides distance travelled and direction of travel, and the neural dead reckoning falls back to reserve. This is the historical behaviour and what you get by calling only `setArNavigationEnabled(true)`.
+- **`POSITION`** — the neural dead reckoning stays the transition model and the VIO position enters as a high-weight observation. The displayed position follows the VIO closely because the observation dominates the likelihood, not because the prediction comes from it — the two are kept separate on purpose, since the same source in both prediction and correction would make the filter more confident than the data allows.
 
   Practical consequence: in this role there is **no relay between sources**. If the camera is covered or tracking is lost, the observation switches off and navigation is the classic one; getting back in requires scanning a new marker.
 
@@ -701,12 +701,12 @@ The preview draws a diagnostic border, because a covered lens or a lost tracking
 Properties you can assign on the preview. They are invoked from the GL thread: switch to the main thread before touching the UI.
 
 - `onFrame: ((Frame) -> Unit)?` → per-frame consumer
-- `onEsitoScansione: ((EsitoScansione, markerId: Int) -> Unit)?` → outcome of each marker scan, so the user knows why nothing happened:
-  - `ACCETTATA` → the scan was accepted and the position is anchored
-  - `ORIENTAMENTO_INSTABILE` → the marker is visible but its pose is not steady enough — typically it is framed at too sharp an angle, or the phone is moving. Ask the user to stand in front of it
+- `onScanResult: ((ScanResult, markerId: Int) -> Unit)?` → outcome of each marker scan, so the user knows why nothing happened:
+  - `ACCEPTED` → the scan was accepted and the position is anchored
+  - `UNSTABLE_ORIENTATION` → the marker is visible but its pose is not steady enough — typically it is framed at too sharp an angle, or the phone is moving. Ask the user to stand in front of it
 - `onRecoveryStatus: ((ArRecoveryStatus) -> Unit)?` → see [Recovery](#7-recovery). Replayed after the preview is re-attached
 - `onRouteGuidance: ((ArRouteGuidance) -> Unit)?` → see [Route arrows](#6-route-arrows). Called only when the value changes
-- `onSenzaAppiglio: ((Boolean) -> Unit)?` → compatibility callback, equivalent to `ArRecoveryStatus.required`. Prefer `onRecoveryStatus`
+- `onAnchorLost: ((Boolean) -> Unit)?` → compatibility callback, equivalent to `ArRecoveryStatus.required`. Prefer `onRecoveryStatus`
 
 ### 4. Marker loading
 
@@ -947,9 +947,9 @@ The positioning models follow a hierarchical structure, from the overall site lo
     This is **not** the compass convention the SDK's AR code works in (zero on +y, clockwise). The conversion between the two is a reflection: `ours = π/2 - theirs`.
   - `floorId`: The floor the marker belongs to.
 
-- **IONArRole**: `MOTO` or `POSIZIONE`. See [Choose the AR role](#2-choose-the-ar-role).
+- **IONArRole**: `MOTION` or `POSITION`. See [Choose the AR role](#2-choose-the-ar-role).
 - **IONArPreview.ArState**: `NO_TRACKING`, `TRACKING`, `ANCHORED_FILTER`, `ANCHORED_MARKER`.
-- **IONArPreview.EsitoScansione**: `ACCETTATA`, `ORIENTAMENTO_INSTABILE`.
+- **IONArPreview.ScanResult**: `ACCEPTED`, `UNSTABLE_ORIENTATION`.
 - **IONArPreview.MarkerLoadListener**: `onMarkersReady(usable, declared, missingImages)`, `onMarkersUnavailable(reason)`.
 - **ArRecoveryStatus**: `required`, `markerScanned`, `calibrationComplete`. See [Recovery](#7-recovery).
 - **ArRouteGuidance**: `HIDDEN`, `IN_VIEW`, `LOOK_LEFT`, `LOOK_RIGHT`. See [Route arrows](#6-route-arrows).
@@ -1039,7 +1039,7 @@ Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is
 ### New APIs
 
 - AR-assisted navigation: `setArNavigationEnabled`, `setArRole`, `attachArPreview`, `updateArPosition`, `IONArPreview`, `IONArRole`, `ARMarker`, `IONSdk.getArMarkersByBuilding`.
-- AR route arrows and recovery: `setArRoute`, `requireArMarkerRescan`, `setArRouteHint`, `clearArRouteHint`, `ArRouteGuidance`, `ArRecoveryStatus`, `IONArPreview.onRouteGuidance` / `onRecoveryStatus` / `onEsitoScansione`.
+- AR route arrows and recovery: `setArRoute`, `requireArMarkerRescan`, `setArRouteHint`, `clearArRouteHint`, `ArRouteGuidance`, `ArRecoveryStatus`, `IONArPreview.onRouteGuidance` / `onRecoveryStatus` / `onScanResult`.
 - Licensing: `IONSdk.getLicenseFeatures`, `IONLicenseFeature`.
 - Availability: `onPositioningAvailabilityChanged`, `PositioningAvailability`, `PositioningUnavailableReason`.
 - Reliability: `onIndoorPositionReliabilityChanged`, `IndoorPositionReliability`, `IndoorPositionUnreliableReason`.
