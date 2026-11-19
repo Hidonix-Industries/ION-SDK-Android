@@ -35,7 +35,7 @@ When creating your license in the ION CMS:
 - Set the correct **Bundle Identifier** of your application
 - The API Key is generated after successful license creation
 
-The SDK validates the license against the provided bundle identifier.
+The license is validated against the provided bundle identifier, and the SDK checks that this identifier belongs to the running app (see [IONSdk Initialization](#ionsdk-initialization)).
 
 ---
 
@@ -73,14 +73,15 @@ Add the following dependencies inside your app module `build.gradle` file. The p
 dependencies {
 
     // ION SDK
-    implementation 'com.github.Hidonix-Industries:ION-SDK-Android:2.2.0'
+    implementation 'com.github.Hidonix-Industries:ION-SDK-Android:2.3.0'
 
     // Required dependencies
+    implementation("androidx.appcompat:appcompat:1.6.1") 
+
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.7.2")
 
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.11.0")
 
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
@@ -93,7 +94,7 @@ dependencies {
     // Positioning models (neural dead reckoning, floor classifier)
     implementation("org.tensorflow:tensorflow-lite:2.17.0")
 
-    // Only required if you use AR-assisted navigation (IONArPreview)
+    // ARCore: required, even if you do not use AR-assisted navigation
     implementation("com.google.ar:core:1.51.0")
 
 }
@@ -111,6 +112,37 @@ dependencyResolutionManagement {
 }
 ```
 
+---
+
+### 3. Backup
+
+The SDK keeps its license access token and the device id in the shared preferences file `ion_sdk_prefs.xml`. A library cannot change your app's backup policy, so unless you exclude the file, Android Auto Backup copies it to the cloud and restores it on the user's next device, where the token and the device id are reused. Exclude it:
+
+```
+<!-- res/xml/data_extraction_rules.xml (Android 12+) -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="ion_sdk_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="ion_sdk_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
+
+<!-- res/xml/backup_rules.xml (Android 11 and lower) -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="ion_sdk_prefs.xml" />
+</full-backup-content>
+```
+
+```
+<application
+    android:dataExtractionRules="@xml/data_extraction_rules"
+    android:fullBackupContent="@xml/backup_rules"
+    ... >
+```
+
+If your app already sets `android:allowBackup="false"`, nothing else is needed. After a restore without the file, the SDK simply requests a new token.
 
 ---
 
@@ -127,31 +159,36 @@ The SDK's own manifest already declares the permissions below, and manifest merg
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
 
     <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
+
+The SDK does **not** declare `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE` or `POST_NOTIFICATIONS`: it has no service and shows no notification, and a background location permission declared by a library would force every app that integrates it through the Play Console background location declaration. If your app tracks the user in the background, declare and request them yourself.
+
+`BLUETOOTH_SCAN` is deliberately declared without `android:usesPermissionFlags="neverForLocation"`: with that flag Android filters beacon advertisements out of the scan results, and BLE positioning stops working. Do not add it in your own manifest either.
+
+The AltBeacon library, which your app declares, merges its own permissions as well (`BLUETOOTH` and `BLUETOOTH_ADMIN` without `maxSdkVersion`, `RECEIVE_BOOT_COMPLETED`, `ACCESS_COARSE_LOCATION`). Check your merged manifest if you need the exact list.
 
 If your app also needs the GPS hardware declared, add it yourself:
 
     <uses-feature android:name="android.hardware.location.gps" />
 
-### ARCore is optional
+### ARCore
 
-The SDK declares `android.hardware.camera.ar` with `required="false"` and
+The ARCore library (`com.google.ar:core`) is **required**: the SDK is compiled against it, so your app must declare it even if it never turns AR on (see [Android Project Configuration](#2-android-project-configuration)).
+
+AR support on the device is a different matter. The SDK declares `android.hardware.camera.ar` with `required="false"` and
 `<meta-data android:name="com.google.ar.core" android:value="optional" />`.
 
-This is deliberate: the Play Store will **not** filter out devices without AR support, and ARCore is **not** force-installed. The ARCore installation prompt is raised only by `IONArPreview.openSession()`, that is only when you have actually turned AR on. A device without ARCore keeps working on dead reckoning alone.
+This is deliberate: the Play Store will **not** filter out devices without AR support, and the ARCore app is **not** force-installed. The ARCore installation prompt is raised only by `IONArPreview.openSession()`, that is only when you have actually turned AR on. A device without ARCore keeps working on dead reckoning alone.
 
 ### Runtime Permissions
 
@@ -159,12 +196,9 @@ In addition to the manifest declarations, several permissions must be requested 
 
     ACCESS_FINE_LOCATION
     ACCESS_COARSE_LOCATION
-    ACCESS_BACKGROUND_LOCATION
-    BLUETOOTH / BLUETOOTH_ADMIN
-    BLUETOOTH_SCAN / BLUETOOTH_CONNECT
-    NEARBY_WIFI_DEVICES        (Android 13+)
-    POST_NOTIFICATIONS         (Android 13+, only if you show SDK-driven notifications)
-    CAMERA                     (only for AR-assisted navigation)
+    BLUETOOTH_SCAN / BLUETOOTH_CONNECT   (Android 12+)
+    NEARBY_WIFI_DEVICES                  (Android 13+)
+    CAMERA                               (only for AR-assisted navigation)
 
 Failure to request and grant these permissions at runtime may result in limited or non-functional SDK behavior.
 
@@ -182,7 +216,7 @@ IONSdk.checkPermissions(context) { allGranted: Boolean, missing: List<String> ->
 }
 ```
 
-It checks the permissions without which GPS and BLE scanning do not start: `ACCESS_FINE_LOCATION`, plus `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` on Android 12+. `CAMERA` and `ACCESS_BACKGROUND_LOCATION` are optional and are not reported. It does not require `initialize()`, and the callback runs on the caller's thread.
+It checks the permissions without which GPS and BLE scanning do not start: `ACCESS_FINE_LOCATION`, plus `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` on Android 12+. `CAMERA` is optional and is not reported. It does not require `initialize()`, and the callback runs on the caller's thread.
 
 ---
 
@@ -214,6 +248,7 @@ IONSdk.initialize(
 
 #### Notes
 
+- The bundle identifier must be your app's package name (`context.packageName`), or the package name without its build suffix: the license `com.client.app` is accepted by `com.client.app` and by `com.client.app.debug` (`applicationIdSuffix`), not by `com.other.app`. Otherwise the callback returns `isValid == false` with an error saying the bundle does not match the app package, and no request is made
 - Initialization is **asynchronous**. Internally the SDK downloads its remote configuration, resolves the dynamic base URL and requests an access token
 - Call `initialize()` only once per app lifecycle
 - Always verify license validity before using SDK features: create the `IONLocationManager` only after the callback has returned `isValid == true`
@@ -246,16 +281,49 @@ IONSdk.getLicenseFeatures { features, error -> }
 - `POI`
 - `SAFETY`
 - `WAYFINDING`
-- `AR_NAVIGATION`
-- `TURN_BY_TURN_AR` → route arrows on the floor in the camera view, in addition to the map
-- `AR_ONLY` → the position comes from AR only (see [AR-only licenses](#ar-only-licenses))
+- `TURN_BY_TURN_AR` → route arrows on the floor in the camera view, in addition to the map. The backend grants it only with the `VPS` or `BOTH` navigation mode
 
 Notes:
 
 - An **empty list means no feature is enabled**, not "all of them": treat it as a denial
 - Feature ids unknown to this SDK version are dropped instead of failing the call, so the backend can add features without breaking published apps
-- Features are read from the same license validation that issues the token. If no validation has happened yet in this process (e.g. `initialize()` found a cached token), `getLicenseFeatures()` performs one
-- The SDK itself enforces only `AR_ONLY`. The other features are for your app to gate its own UI
+- Features are read from the claims of the access token, so reading them costs no request. A token cached before the backend started writing the claims says nothing about the license: in that case the SDK requests a new token, once
+- The features are for your app to gate its own UI; the SDK does not enforce them. What the SDK does enforce is the [navigation mode](#navigation-mode)
+
+#### Navigation mode
+
+How the license allows the user to be positioned is no longer a feature but a separate value:
+
+```
+// Kotlin (suspend)
+val mode: IONNavigationMode = IONSdk.getNavigationMode()
+
+// Callback variant, safe to call from Java
+IONSdk.getNavigationMode { mode, error -> }
+```
+
+`IONNavigationMode`:
+
+- `GEOMAGNETIC` → the filter only: magnetic field, beacons, Wi-Fi, dead reckoning. No VPS
+- `VPS` → the position comes from the camera only (see [VPS mode](#vps-mode))
+- `BOTH` → geomagnetic and VPS together: the filter stays underneath as the fallback
+- `supportsVps: Boolean` → `true` for `VPS` and `BOTH`
+
+A token issued before the backend wrote the mode reads as `GEOMAGNETIC`, the mode that enables nothing extra; the token renews itself before it expires. The mode and `TURN_BY_TURN_AR` are independent: check both.
+
+#### Refreshing the license
+
+Features and mode are those of the token in hand, i.e. of the license at the time the token was issued. To pick up a change made in the CMS while the app is open:
+
+```
+// Kotlin (suspend)
+val features = IONSdk.refreshLicense()
+
+// Callback variant, safe to call from Java
+IONSdk.refreshLicense { features, error -> }
+```
+
+It re-reads features and mode from the server, and from then on `getLicenseFeatures()` and `getNavigationMode()` return the new values. It costs a request: call it when there is a reason (the app returns to the foreground, the user opens navigation), not on every read. If the license has been deactivated the server answers 403 `LICENSE_REVOKED`, reported as an `HttpException` (or as the callback's error); the previous values are kept.
 
 ---
 
@@ -269,7 +337,7 @@ Notes:
 - `getLocation(lat, lon): LocationRoot` → the location covering a geographical point
 - `getBuilding(locationId, buildingId): Building`
 - `getBuildingByBeacon(locationId, beaconUuid): Building` → resolves a building from a detected beacon UUID
-- `getFloor(floorId): LevelInfo` → lightweight floor descriptor (name, image, rotation, georeference)
+- `getFloor(floorId): LevelInfo` → lightweight floor descriptor (name, image, 3D model, rotation, georeference)
 
 #### POIs
 
@@ -290,6 +358,8 @@ Notes:
 #### License
 
 - `getLicenseFeatures(): List<IONLicenseFeature>` → see [License Features](#license-features)
+- `getNavigationMode(): IONNavigationMode` → see [Navigation mode](#navigation-mode)
+- `refreshLicense(): List<IONLicenseFeature>` → see [Refreshing the license](#refreshing-the-license)
 
 #### Telemetry
 
@@ -631,7 +701,9 @@ When enabled, the SDK accepts AR marker fixes as **seeds of the particle filter'
 
 This flag decides whether the AR channel *exists* — it is not a choice of which odometry source drives the position at a given instant. The neural dead reckoning stays alive as a reserve for the whole session, and ownership moves between the two on the pipeline's own cycle.
 
-Enabling AR does not make ARCore a requirement of your app: a device without ARCore support simply never produces fixes.
+The ARCore library must always be declared (see [Android Project Configuration](#2-android-project-configuration)), but enabling AR does not make AR support a requirement of the device: a device without ARCore support simply never produces fixes.
+
+**The license has the last word.** Enabling is ignored, with a warning in the log, when the license is in the `GEOMAGNETIC` [navigation mode](#navigation-mode): that license positions with the field, not with the camera. It goes through with `VPS` and `BOTH`, and also while the mode is still unknown (no token yet, or a token issued before the backend wrote the mode), because refusing what has not been read would deny AR to everyone. Disabling is never refused.
 
 ### 2. Choose the AR role
 
@@ -782,9 +854,13 @@ ionLocationManager.clearArRouteHint()
 
 While navigating and while AR is **not** guiding, pass on every fix where the app places the user on the route (`snappedPosition`, e.g. `RouteProgressTracker.Match.position`) and the route direction there (`bearingDeg`, degrees clockwise from north). Typical case: a lift ride, where ARCore loses tracking. Once the user has walked a few metres along a straight stretch, the route gives the position and the route direction versus the walk measured by ARCore gives the alignment, so AR is put back in service without a marker. It is also used when AR is anchored but too uncertain to guide. The hint is ignored while AR is guiding, or on a floor other than the current one. Call `clearArRouteHint()` when navigation ends or when you have no reliable hint.
 
-### AR-only licenses
+### VPS mode
 
-With the `AR_ONLY` license feature and AR navigation enabled, the position comes from AR alone: there is no fallback to the filter (dead reckoning, beacons, magnetic field, Wi-Fi). When AR is lost the dot stops and the user is asked to frame a marker. The floor is changed only by markers and by the barometer, not by beacons or the floor classifier.
+With the `VPS` [navigation mode](#navigation-mode) and AR navigation enabled, the position comes from AR alone: there is no fallback to the filter (dead reckoning, beacons, magnetic field, Wi-Fi). When AR is lost the dot stops and the user is asked to frame a marker. The floor is changed only by markers and by the barometer, not by beacons or the floor classifier. The neural position model and the floor classifier are not run, and BLE scanning starts only in locations with several beacon buildings, where it is needed to pick the building.
+
+In this mode a floor does not need a navigation map: a floor without one is still usable as long as `get-building` provides its georeferenced floor plan (`Level.floor_map_url` plus four `georeference` corners). `Level.loadMapNew()` then returns a `LevelMap` built from the floor plan alone, with `floorPlanOnly == true`.
+
+With `BOTH` the same AR pipeline runs, but the filter stays underneath as the fallback.
 
 ---
 
@@ -795,6 +871,24 @@ val report: String = NavigationDiagnostics.read(context)
 ```
 
 Returns a JSON report of the resources actually loaded in the last navigation session (location, building, floors, models), kept across process restarts. Useful to attach to bug reports. Returns `"No navigation session recorded."` if there is none.
+
+The report lives in the app's private storage. A copy is also written to `Android/data/<your package>/files/diagnostics/last-navigation.json`, where it can be pulled over ADB, but only when the app is debuggable or when you opt in from your manifest:
+
+```
+<meta-data android:name="com.hidonix.ion.NAVIGATION_DIAGNOSTICS_FILE" android:value="true" />
+```
+
+Do not ship the opt-in in production builds: on Android 8 and 9, other apps holding `READ_EXTERNAL_STORAGE` can read that folder. Without it the SDK deletes the copy left by earlier versions.
+
+Navigation data errors are recorded in the report and in the log; the SDK shows no `Toast` of its own. An invalid license is reported only through the `initialize` / `checkLicense` callbacks.
+
+#### Calibration sensor trace
+
+```
+<meta-data android:name="com.hidonix.ion.CALIBRATION_TRACE" android:value="true" />
+```
+
+Records the raw motion and magnetic sensor samples of a session to `Android/data/<your package>/files/diagnostics/calibration/` (at most 10 minutes per file, the last three files are kept). It is meant for calibration debugging and works **only in debuggable builds**: in any other build the flag is ignored.
 
 ---
 
@@ -886,8 +980,12 @@ The positioning models follow a hierarchical structure, from the overall site lo
   - `height`: Altitude of the floor in meters.
   - `magDeclination`: Magnetic declination at this floor.
   - `mapUrl` / `flatMapUrl`: JSON and FlatBuffer sources of the floor's positioning data.
+  - `floor_map_url`: The floor plan image. From navigation map format 3 the floor plan and its corners come from the level, not from the navigation map; `loadMapNew` copies them into `map` when the map lacks them.
+  - `floorMap3dUrl`: The floor's 3D model in GeoJSON, or `null` without 3D maps or without a model (draw `floor_map_url` as usual).
+  - `map_width` / `map_height`: Size of the floor plan on the Earth, in meters; `0` for a floor that is not georeferenced.
+  - `map_rotation`: Floor plan rotation, in degrees clockwise.
+  - `georeference`: The floor plan's 4 corners, in this order: top-left, top-right, bottom-left, bottom-right. Empty for a floor that is not georeferenced.
   - `map`: A `LevelMap` object containing the floorplan and positioning details.
-  - `particle_filter_config`: Per-floor tuning of the estimator.
   - `standardPois` / `servicePois`: Lists of POIs available on this floor.
   - `indoor_geofences`: Geofences associated with the floor.
   - `mapName`, `mapLastUpdate`: Internal map name and timestamp of the last update.
@@ -895,9 +993,11 @@ The positioning models follow a hierarchical structure, from the overall site lo
 
 - **LevelInfo**: Lightweight floor descriptor returned by `IONSdk.getFloor`.
   - `id`, `number`, `name`, `buildingId`, `buildingName`, `imageUrl`, `rotation`, `georeference`.
+  - `floorPlan3dUrl`: The floor's 3D model in GeoJSON, or `null`.
 
 - **IONLevel**: The floor as published to the app by the listener callbacks.
   - `id`, `floorLevel`, `floorName`, `mapName`, `imageUrl`.
+  - `getFloorPlan3dUrl()`: The floor's 3D model, or `null` when the customer has no 3D maps, the floor is not georeferenced, or the plan was never saved in the CMS editor — draw `imageUrl` as usual in those cases. It is a GeoJSON `FeatureCollection` in WGS84 `[lng, lat]` coordinates, to be extruded floor by floor. The URL is pre-signed and valid for 60 minutes; the file name before `?` is the hash of the content, so it is also a cache key.
   - `width` / `height`, `rotation`, `altitude`, `georeferences`.
   - `getGeofences()`, `getStandardPois()`, `getServicePOIS()`.
 
@@ -910,9 +1010,11 @@ The positioning models follow a hierarchical structure, from the overall site lo
   - `wifis` / `wifi_rssi`: Access point identifiers and their reference RSSI, parallel by index.
   - `sparse_map`, `map_size_x/y/h`, `feature_size`, `spatial_granularity`, `heading_quantum`, `magnetic_range`: The magnetic fingerprint and its discretisation.
   - `tcn_model_url` / `tcn_metadata_url`, `floor_tcn_model_url` / `floor_tcn_metadata_url`: Neural models for position and floor.
+  - `floorPlanOnly`: This is not a navigation map but only the level's floor plan (no mask, no magnetic map, no beacons). Happens in [VPS mode](#vps-mode) for floors without a navigation map.
 
 - **OutdoorMap**: The outdoor counterpart of `LevelMap`.
   - `floorplan_png`, `width`, `height`, `rotation`, `georeference`.
+  - `floorPlan3dUrl`: The outdoor 3D model in GeoJSON, or `null`.
 
 - **Beacon**: Represents a BLE sensor used for indoor positioning.
   - `uuid`, `major`, `minor`: Proximity UUID and identification numbers.
@@ -931,9 +1033,12 @@ The positioning models follow a hierarchical structure, from the overall site lo
 
 ### License Models
 
-- **IONLicenseFeature**: `POI`, `SAFETY`, `WAYFINDING`, `AR_NAVIGATION`, `TURN_BY_TURN_AR`, `AR_ONLY`.
+- **IONLicenseFeature**: `POI` (0), `SAFETY` (1), `WAYFINDING` (2), `TURN_BY_TURN_AR` (4).
   - `id`: The integer the backend uses for the feature.
   - `fromId(id)`: Resolves an id, or returns `null` if this SDK version does not know it.
+- **IONNavigationMode**: `GEOMAGNETIC` (0), `VPS` (1), `BOTH` (2). See [Navigation mode](#navigation-mode).
+  - `id`, `fromId(id)`: As for `IONLicenseFeature`.
+  - `supportsVps`: `true` for `VPS` and `BOTH`.
 
 ### AR Models
 
@@ -1032,6 +1137,21 @@ The callbacks marked *optional* have a default implementation, so existing liste
 
 `IndoorGeofence` and `SystemGeofence` are not separate types: there is a single `IONGeofence`, and the `category` field distinguishes the two (`1` crowd management, `2` restricted, `3` system). The trigger enum is `IONGeofence.GeofenceEvent` with values `ON_ENTER` / `ON_EXIT` / `ON_DWELL`.
 
+### License features and navigation mode
+
+| Before | Now |
+| --- | --- |
+| `IONLicenseFeature.AR_NAVIGATION` (3) | Removed. Check `IONSdk.getNavigationMode()`: AR is available with `VPS` and `BOTH`. Licenses that had AR Navigation are now `BOTH` |
+| `IONLicenseFeature.AR_ONLY` (5) | Removed. Replaced by `IONNavigationMode.VPS`, same behaviour — see [VPS mode](#vps-mode) |
+
+`setArNavigationEnabled(true)` is now ignored when the license is `GEOMAGNETIC`. Features and mode are read from the token's claims; use `IONSdk.refreshLicense()` to re-read them from the server.
+
+### Level model
+
+`Level.particle_filter_config` is no longer public: it is the estimator's own tuning. The floor plan of a level now comes from `get-building` (`floor_map_url`, `map_width`, `map_height`, `map_rotation`, `georeference`), and `loadMapNew` still copies it into `Level.map`, so code reading `level.map.georeference` keeps working.
+
+`LevelCacheEntry` and `LevelCacheManager` are no longer public.
+
 ### IONLocationManager lifecycle
 
 Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is kept for compatibility and does not start anything by itself. `stopLocationUpdates()` is final for that instance: create a new manager to start again.
@@ -1040,7 +1160,8 @@ Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is
 
 - AR-assisted navigation: `setArNavigationEnabled`, `setArRole`, `attachArPreview`, `updateArPosition`, `IONArPreview`, `IONArRole`, `ARMarker`, `IONSdk.getArMarkersByBuilding`.
 - AR route arrows and recovery: `setArRoute`, `requireArMarkerRescan`, `setArRouteHint`, `clearArRouteHint`, `ArRouteGuidance`, `ArRecoveryStatus`, `IONArPreview.onRouteGuidance` / `onRecoveryStatus` / `onScanResult`.
-- Licensing: `IONSdk.getLicenseFeatures`, `IONLicenseFeature`.
+- Licensing: `IONSdk.getLicenseFeatures`, `IONLicenseFeature`, `IONSdk.getNavigationMode`, `IONNavigationMode`, `IONSdk.refreshLicense`.
+- 3D maps: `IONLevel.getFloorPlan3dUrl`, `LevelInfo.floorPlan3dUrl`, `Level.floorMap3dUrl`, `OutdoorMap.floorPlan3dUrl`.
 - Availability: `onPositioningAvailabilityChanged`, `PositioningAvailability`, `PositioningUnavailableReason`.
 - Reliability: `onIndoorPositionReliabilityChanged`, `IndoorPositionReliability`, `IndoorPositionUnreliableReason`.
 - Calibration: `getLastCalibrationGestureMs`, `revalidateCalibration`, `CalibrationLevel`, `onCalibrationStatus`, `CalibrationStatus`, `CalibrationIssue`.
@@ -1050,13 +1171,25 @@ Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is
 - Permissions: `IONSdk.checkPermissions`.
 - Content API on `IONSdk`: `getMyLocations`, `getFloor`, `getNavigationPois`, `getBuildingByBeacon`, `getSystemGeofencesByFloor`, `getStandardPoiDetails`, `sendPosition`, `checkLicense`.
 
-### New dependencies
+### Dependencies
 
-`org.altbeacon:android-beacon-library` must now be declared by the app, and OkHttp should be aligned to `4.12.0`. See [Android Project Configuration](#2-android-project-configuration).
+`org.altbeacon:android-beacon-library` and `androidx.appcompat:appcompat` must now be declared by the app, and OkHttp should be aligned to `4.12.0`. `com.squareup.okhttp3:logging-interceptor` is no longer used by the SDK: you can remove it unless your app uses it. See [Android Project Configuration](#2-android-project-configuration).
 
-### New permissions
+### Permissions
 
-`CAMERA`, `POST_NOTIFICATIONS`, `NEARBY_WIFI_DEVICES`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`, `ACCESS_NETWORK_STATE`, `FOREGROUND_SERVICE`, `BLUETOOTH_CONNECT` are now declared by the SDK manifest and merged into your app. Request `CAMERA` and `NEARBY_WIFI_DEVICES` at runtime where relevant.
+`CAMERA`, `NEARBY_WIFI_DEVICES`, `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`, `ACCESS_NETWORK_STATE`, `BLUETOOTH_CONNECT` are now declared by the SDK manifest and merged into your app. Request `CAMERA` and `NEARBY_WIFI_DEVICES` at runtime where relevant.
+
+`ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE` and `POST_NOTIFICATIONS` are **no longer** declared by the SDK. If your app relied on the SDK to declare them, declare them in your own manifest. `BLUETOOTH` and `BLUETOOTH_ADMIN` are now limited to Android 11 and lower (`maxSdkVersion="30"`).
+
+### Bundle identifier check
+
+`IONSdk.initialize` now fails (`isValid == false`) when the bundle identifier does not match the app's package name. A build suffix is tolerated (`com.client.app.debug` for the license `com.client.app`). Pass `context.packageName`, or the base package if your builds use `applicationIdSuffix`.
+
+### Backup and diagnostics
+
+- Exclude `ion_sdk_prefs.xml` from backups: see [Backup](#3-backup).
+- The diagnostics file on external storage is written only by debuggable apps or with the `com.hidonix.ion.NAVIGATION_DIAGNOSTICS_FILE` opt-in, and `CALIBRATION_TRACE` is ignored outside debuggable builds. See [Diagnostics](#diagnostics).
+- The SDK no longer shows `Toast` messages ("Not valid license…", "Navigation data error…"). Handle the `initialize` callback to inform the user.
 
 ---
 
@@ -1064,8 +1197,10 @@ Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is
 
 - Request all runtime permissions before initializing the SDK (`IONSdk.checkPermissions` tells you which are missing)
 - Initialize the SDK once per app lifecycle
+- Exclude `ion_sdk_prefs.xml` from backups (see [Backup](#3-backup))
 - Check license validity before using any feature, and create `IONLocationManager` only after a valid license
 - Gate your features on `IONSdk.getLicenseFeatures()`; an empty list means nothing is enabled
+- Offer AR only when `IONSdk.getNavigationMode().supportsVps` is true, and call `IONSdk.refreshLicense()` when the app returns to the foreground if license changes must be picked up without a restart
 - Stop updates when your map screen goes away, and create a new manager to start again
 - Use `onPositioningAvailabilityChanged` and `onIndoorPositionReliabilityChanged` to avoid showing a position the SDK cannot produce or does not yet trust
 - Call `revalidateCalibration()` when the app returns to the foreground
@@ -1079,7 +1214,7 @@ Positioning starts in `IONLocationManager.create()`. `startLocationUpdates()` is
 1. Configure API Key
 2. Request runtime permissions
 3. Initialize SDK
-4. Validate license (wait for `isValid == true`) and read the license features
+4. Validate license (wait for `isValid == true`) and read the license features and navigation mode
 5. Create IONLocationManager (positioning starts here)
 6. Register listener
 7. (Optional) Enable AR, choose the role, attach the preview

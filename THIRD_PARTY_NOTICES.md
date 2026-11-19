@@ -36,7 +36,6 @@ These libraries are **not** bundled in the AAR. They are resolved by the integra
 | Retrofit | `com.squareup.retrofit2:retrofit` | 2.9.0 | [Apache-2.0](#apache-license-20) |
 | Retrofit Gson converter | `com.squareup.retrofit2:converter-gson` | 2.7.2 | [Apache-2.0](#apache-license-20) |
 | OkHttp | `com.squareup.okhttp3:okhttp` | 4.12.0 | [Apache-2.0](#apache-license-20) ¹ |
-| OkHttp Logging Interceptor | `com.squareup.okhttp3:logging-interceptor` | 4.11.0 | [Apache-2.0](#apache-license-20) |
 | Okio (transitive, via OkHttp) | `com.squareup.okio:okio` | — | [Apache-2.0](#apache-license-20) |
 | Gson | `com.google.code.gson:gson` | 2.8.9 | [Apache-2.0](#apache-license-20) |
 | FlatBuffers | `com.google.flatbuffers:flatbuffers-java` | 25.2.10 | [Apache-2.0](#apache-license-20) |
